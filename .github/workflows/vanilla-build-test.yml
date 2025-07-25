@@ -1,0 +1,84 @@
+name: Test Vanilla QField Build
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  QT_VERSION: 6.7.2
+
+jobs:
+  build-windows-vanilla:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    
+    steps:
+    - name: 🔄 Checkout original QField code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: 📦 Setup MSVC
+      uses: microsoft/setup-msbuild@v2
+      with:
+        msbuild-architecture: x64
+
+    - name: 🔧 Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: 3.28.1
+
+    - name: 🗂️ Create build directory
+      run: |
+        mkdir -p C:\build
+        echo "VCPKG_BUILDTREES_ROOT=C:\build" >> $env:GITHUB_ENV
+
+    - name: 🎯 Configure with CMake (Original QField)
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmake -S . -B build ^
+          -G "Visual Studio 17 2022" ^
+          -A x64 ^
+          -D CMAKE_BUILD_TYPE=Release ^
+          -D VCPKG_TARGET_TRIPLET=x64-windows-static ^
+          -D CMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" ^
+          -D PKG_CONFIG_EXECUTABLE=build/vcpkg_installed/x64-windows-static/tools/pkgconf/pkgconf.exe ^
+          -D VCPKG_INSTALL_OPTIONS="--x-buildtrees-root=C:/build" ^
+          -D WITH_VCPKG=ON
+      env:
+        VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+    - name: ⚙️ Build QField (Original)
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmake --build build --config Release --parallel 2
+      env:
+        VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+    - name: 📊 Build Results Summary
+      if: always()
+      run: |
+        Write-Host "=== VANILLA QFIELD BUILD TEST ==="
+        Write-Host "Commit: ${{ github.sha }}"
+        Write-Host "Status: ${{ job.status }}"
+        if (Test-Path "build\Release\QField.exe") {
+          $size = (Get-Item "build\Release\QField.exe").Length / 1MB
+          Write-Host "✅ SUCCESS: QField.exe built successfully"
+          Write-Host "Executable size: $([math]::Round($size, 2)) MB"
+        } else {
+          Write-Host "❌ FAILED: QField.exe not found"
+          Write-Host "Checking for other outputs..."
+          Get-ChildItem -Recurse build -Filter "*.exe" | ForEach-Object { Write-Host "Found: $($_.FullName)" }
+        }
+
+    - name: 🚀 Upload artifacts if successful
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: QField-Windows-Vanilla-Build
+        path: build/Release/QField.exe
+        retention-days: 3
